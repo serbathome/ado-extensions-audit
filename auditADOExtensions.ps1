@@ -33,11 +33,11 @@ function Get-DictFromCsv {
 }
 
 # Constants and configuration
+. "$PSScriptRoot\AdoAuth.ps1"
 $organization = $env:ADO_ORGANIZATION
-$pat = $env:ADO_PAT
-$headers = @{
-    Authorization = "Bearer $pat"
-}
+# Authenticates with a PAT (ADO_PAT) by default, or with Microsoft Entra ID sign-in
+# when $env:ADO_AUTH_MODE is set to "OAuth". See README.md for details.
+$headers = Get-AdoAuthHeader
 $csvPath = "dict.csv"
 $DebugPreference = "Continue" # set to "SilentlyContinue" to disable debug output
 

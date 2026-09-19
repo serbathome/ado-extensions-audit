@@ -5,14 +5,30 @@ This repository contains PowerShell scripts for auditing and analyzing Azure Dev
 ## Prerequisites
 
 - PowerShell 5.1 or higher
-- Azure DevOps access token with appropriate permissions
+- A way to authenticate to Azure DevOps (choose one, see [Authentication](#authentication) below):
+  - A Personal Access Token (PAT) with appropriate permissions, or
+  - Sign-in with your Microsoft Entra ID (Azure AD) account (no PAT required)
 - Environment variables set up:
   - `ADO_ORGANIZATION`: Your Azure DevOps organization name
-  - `ADO_PAT`: Your Personal Access Token
+  - `ADO_PAT`: Your Personal Access Token (only required in PAT mode)
 
-## Setting Up Environment Variables
+## Authentication
 
-Before running the scripts, set up your environment variables:
+All three scripts share a common authentication helper, [`AdoAuth.ps1`](./AdoAuth.ps1), which builds the
+`Authorization` header used for every Azure DevOps REST API call. It supports two modes, selected with the
+`$env:ADO_AUTH_MODE` environment variable:
+
+| `ADO_AUTH_MODE` | Description | Extra requirements |
+| --- | --- | --- |
+| `PAT` (default) | Uses `$env:ADO_PAT` with Basic authentication, same as before. | None. |
+| `OAuth` | Uses a Microsoft Entra ID access token, acquired interactively via the `Az.Accounts` PowerShell module. No PAT is created or stored. | The [`Az.Accounts`](https://www.powershellgallery.com/packages/Az.Accounts) module (`Install-Module Az.Accounts -Scope CurrentUser`). |
+
+This addresses [#2](https://github.com/serbathome/ado-extensions-audit/issues/2): organizations that block PAT
+creation can now run these scripts by signing in interactively instead.
+
+### Option A: Personal Access Token (PAT)
+
+Set up your environment variables before running the scripts:
 
 ```powershell
 # Windows PowerShell
@@ -23,6 +39,38 @@ $env:ADO_PAT = "your-personal-access-token"
 $env:ADO_ORGANIZATION = "your-organization-name"
 $env:ADO_PAT = "your-personal-access-token"
 ```
+
+### Option B: Microsoft Entra ID (OAuth) sign-in — no PAT needed
+
+Instead of a PAT, you can sign in interactively with your Microsoft Entra ID account. This requires the
+`Az.Accounts` PowerShell module, which handles the interactive browser/device-code prompt and token
+acquisition — no Azure CLI installation is required.
+
+```powershell
+# One-time module install
+Install-Module Az.Accounts -Scope CurrentUser
+
+# Configure the scripts to use Entra ID sign-in instead of a PAT
+$env:ADO_ORGANIZATION = "your-organization-name"
+$env:ADO_AUTH_MODE = "OAuth"
+
+# Run any of the scripts as usual; a sign-in prompt appears the first time
+# a token is needed (or when the cached Az context has expired).
+./auditADOExtensions.ps1
+```
+
+Notes and requirements for OAuth mode:
+
+- Your Azure DevOps organization must be connected to (backed by) a Microsoft Entra ID tenant. Organizations
+  that are only backed by Microsoft accounts (MSA) cannot use this mode — use a PAT instead.
+- The acquired token reflects your own Azure DevOps permissions (same access as when signing in through the
+  browser); there is no separate scope-consent step like with PATs.
+- Tokens are short-lived (about one hour). `Az.Accounts` caches your sign-in (`Connect-AzAccount`), so
+  subsequent script runs in the same session typically won't prompt again until the cached context expires.
+- To sign out / clear the cached context: `Disconnect-AzAccount`.
+- For unattended/CI scenarios, `Connect-AzAccount` also supports service principals and managed identities
+  (see the [`Az.Accounts` docs](https://learn.microsoft.com/powershell/module/az.accounts/connect-azaccount)),
+  which avoids the interactive prompt entirely.
 
 ## Scripts Overview
 
@@ -88,6 +136,12 @@ This script analyzes which tasks are actually being used in your Azure DevOps pi
 4. Parses the YAML to find task references in the format `task: TaskName@Version`
 5. Outputs the tasks used in each pipeline
 
+## The Authentication Helper (`AdoAuth.ps1`)
+
+The `AdoAuth.ps1` file is dot-sourced by all three scripts and exposes `Get-AdoAuthHeader`, which returns the
+`Authorization` header hashtable to use for `Invoke-RestMethod` calls, based on `$env:ADO_AUTH_MODE`
+(`PAT` or `OAuth`). See [Authentication](#authentication) for configuration details.
+
 ## The Dictionary File (`dict.csv`)
 
 The `dict.csv` file contains a mapping of Azure DevOps permission scopes to their descriptions. This is used by the extensions audit script to provide readable descriptions of the permissions requested by each extension.
@@ -96,13 +150,20 @@ The `dict.csv` file contains a mapping of Azure DevOps permission scopes to thei
 
 If you encounter errors:
 
-1. Verify your environment variables are set correctly
-2. Ensure your PAT has sufficient permissions:
+1. Verify your environment variables are set correctly (`ADO_ORGANIZATION`, and either `ADO_PAT` or
+   `ADO_AUTH_MODE = "OAuth"`).
+2. Ensure your account/PAT has sufficient permissions:
    - For extensions audit: `vso.extension` and `vso.extension.data` scopes
    - For pipelines audit: `vso.build` and `vso.project` scopes
    - For tasks audit: `vso.build` scope
-3. Check your network connectivity to Azure DevOps
-4. Set `$DebugPreference = "Continue"` (already in scripts) to see detailed debug output
+   - In OAuth mode, these correspond to your normal Azure DevOps organization/project permissions rather than
+     PAT scopes.
+3. In OAuth mode, if you see `The 'Az.Accounts' PowerShell module isn't installed`, run
+   `Install-Module Az.Accounts -Scope CurrentUser`.
+4. In OAuth mode, if sign-in fails or hangs in a headless/remote session, run `Connect-AzAccount -UseDeviceAuthentication`
+   once in an interactive session first so a cached context/device-code flow can be used.
+5. Check your network connectivity to Azure DevOps
+6. Set `$DebugPreference = "Continue"` (already in scripts) to see detailed debug output
 
 ## Notes
 
