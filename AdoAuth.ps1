@@ -50,10 +50,22 @@ function Get-AdoPatBase64 {
 }
 
 function Get-AdoEntraAccessToken {
-    if (-not (Get-Module -ListAvailable -Name Az.Accounts)) {
-        throw "ADO_AUTH_MODE is set to 'OAuth' but the 'Az.Accounts' PowerShell module isn't installed. Install it with: Install-Module Az.Accounts -Scope CurrentUser"
+    # Only import Az.Accounts if no version of it is already loaded in this session. Explicitly
+    # (re-)importing a different version than one already loaded can fail with an "assembly already
+    # loaded" error, because Az's native assemblies can't be side-loaded side-by-side in one process.
+    # This commonly happens right after upgrading the Az module in a terminal that had already loaded
+    # the older version (e.g. via an earlier Connect-AzAccount call) -- restarting the terminal avoids it.
+    if (-not (Get-Module -Name Az.Accounts)) {
+        if (-not (Get-Module -ListAvailable -Name Az.Accounts)) {
+            throw "ADO_AUTH_MODE is set to 'OAuth' but the 'Az.Accounts' PowerShell module isn't installed. Install it with: Install-Module Az.Accounts -Scope CurrentUser"
+        }
+        try {
+            Import-Module Az.Accounts -ErrorAction Stop
+        }
+        catch {
+            throw "Failed to load the 'Az.Accounts' module: $($_.Exception.Message). If you recently updated the Az module, close and reopen your PowerShell terminal, then try again."
+        }
     }
-    Import-Module Az.Accounts -ErrorAction Stop
 
     if (-not (Get-AzContext -ErrorAction SilentlyContinue)) {
         Write-Output "Sign in with your Microsoft Entra ID account (a browser window will open)..."

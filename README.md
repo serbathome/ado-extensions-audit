@@ -160,7 +160,11 @@ If you encounter errors:
      PAT scopes.
 3. In OAuth mode, if you see `The 'Az.Accounts' PowerShell module isn't installed`, run
    `Install-Module Az.Accounts -Scope CurrentUser`.
-4. In OAuth mode, if sign-in fails or hangs in a headless/remote session, run `Connect-AzAccount -UseDeviceAuthentication`
+4. In OAuth mode, if you see `Could not load file or assembly 'Microsoft.Azure.PowerShell...'. Assembly with same
+   name is already loaded`, an older version of `Az.Accounts` was already loaded in that terminal (for example
+   from a previous `Connect-AzAccount` call before an Az module upgrade). Close and reopen your PowerShell
+   terminal/window and try again — different Az module versions can't be loaded side by side in the same session.
+5. In OAuth mode, if sign-in fails or hangs in a headless/remote session, run `Connect-AzAccount -UseDeviceAuthentication`
    once in an interactive session first so a cached context/device-code flow can be used.
 5. Check your network connectivity to Azure DevOps
 6. Set `$DebugPreference = "Continue"` (already in scripts) to see detailed debug output
