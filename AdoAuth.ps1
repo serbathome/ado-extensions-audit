@@ -14,6 +14,38 @@
 # See: https://learn.microsoft.com/azure/devops/cli/entra-tokens
 $script:AdoEntraResourceId = "499b84ac-1321-427f-aa17-267ca6975798"
 
+function Resolve-AdoOrganizationName {
+    <#
+    .SYNOPSIS
+    Normalizes $env:ADO_ORGANIZATION into a bare organization name.
+
+    .DESCRIPTION
+    ADO_ORGANIZATION should be just the organization name (e.g. "contoso"), but it's an easy mistake
+    to paste a full URL instead (e.g. "https://dev.azure.com/contoso" or "https://contoso.visualstudio.com").
+    This strips those known URL forms down to the bare name so the scripts keep working either way.
+    #>
+    param (
+        [Parameter(Mandatory = $true)]
+        [AllowEmptyString()]
+        [string]$Organization
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Organization)) {
+        throw "ADO_ORGANIZATION environment variable is not set. Set it to your Azure DevOps organization name (e.g. 'contoso'), not a full URL."
+    }
+
+    $trimmed = $Organization.Trim().TrimEnd('/')
+
+    if ($trimmed -match '^https?://dev\.azure\.com/([^/]+)') {
+        return $Matches[1]
+    }
+    if ($trimmed -match '^https?://([^.]+)\.visualstudio\.com') {
+        return $Matches[1]
+    }
+
+    return $trimmed
+}
+
 function Get-AdoAuthHeader {
     <#
     .SYNOPSIS
@@ -69,7 +101,21 @@ function Get-AdoEntraAccessToken {
 
     if (-not (Get-AzContext -ErrorAction SilentlyContinue)) {
         Write-Output "Sign in with your Microsoft Entra ID account (a browser window will open)..."
-        Connect-AzAccount -ErrorAction Stop | Out-Null
+
+        # We only need an access token for Azure DevOps, not an Azure Resource Manager subscription
+        # context, so skip populating a context per subscription (-SkipContextPopulation). If the
+        # account has access to many tenants (e.g. as a guest), Connect-AzAccount otherwise prompts
+        # with a long "select a tenant and subscription" list and probes every tenant for a token.
+        # Set $env:ADO_ENTRA_TENANT_ID to your Azure DevOps organization's Microsoft Entra tenant ID
+        # (or domain name) to skip straight to that tenant and avoid that prompt entirely.
+        $connectParams = @{
+            SkipContextPopulation = $true
+            ErrorAction           = "Stop"
+        }
+        if ($env:ADO_ENTRA_TENANT_ID) {
+            $connectParams["Tenant"] = $env:ADO_ENTRA_TENANT_ID
+        }
+        Connect-AzAccount @connectParams | Out-Null
     }
 
     $tokenResult = Get-AzAccessToken -ResourceUrl $script:AdoEntraResourceId -ErrorAction Stop

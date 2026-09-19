@@ -9,7 +9,9 @@ This repository contains PowerShell scripts for auditing and analyzing Azure Dev
   - A Personal Access Token (PAT) with appropriate permissions, or
   - Sign-in with your Microsoft Entra ID (Azure AD) account (no PAT required)
 - Environment variables set up:
-  - `ADO_ORGANIZATION`: Your Azure DevOps organization name
+  - `ADO_ORGANIZATION`: Your Azure DevOps organization name — just the short name (e.g. `contoso`), **not**
+    a full URL. If you accidentally set it to `https://dev.azure.com/contoso` or
+    `https://contoso.visualstudio.com`, the scripts detect and correct this automatically.
   - `ADO_PAT`: Your Personal Access Token (only required in PAT mode)
 
 ## Authentication
@@ -71,6 +73,11 @@ Notes and requirements for OAuth mode:
 - For unattended/CI scenarios, `Connect-AzAccount` also supports service principals and managed identities
   (see the [`Az.Accounts` docs](https://learn.microsoft.com/powershell/module/az.accounts/connect-azaccount)),
   which avoids the interactive prompt entirely.
+- If your account has access to many Microsoft Entra tenants (e.g. as a guest in several organizations),
+  `Connect-AzAccount` may show a long "select a tenant and subscription" list and print warnings for
+  unrelated tenants — this is normal and harmless (we only need one token, not a subscription), but you can
+  skip it by setting `$env:ADO_ENTRA_TENANT_ID` to your Azure DevOps organization's Microsoft Entra tenant ID
+  (found under your organization's **Organization settings > Microsoft Entra ID** page) before running a script.
 
 ## Scripts Overview
 
@@ -166,10 +173,20 @@ If you encounter errors:
    terminal/window and try again — different Az module versions can't be loaded side by side in the same session.
 5. In OAuth mode, if sign-in fails or hangs in a headless/remote session, run `Connect-AzAccount -UseDeviceAuthentication`
    once in an interactive session first so a cached context/device-code flow can be used.
-5. Check your network connectivity to Azure DevOps
-6. Set `$DebugPreference = "Continue"` (already in scripts) to see detailed debug output
+6. If you see `The resource cannot be found` (HTTP 404), double-check `ADO_ORGANIZATION` is just the
+   organization name and not a full URL (see [Prerequisites](#prerequisites) — the scripts normalize common
+   URL forms automatically, but other typos in the name will still 404).
+7. In OAuth mode, if `Connect-AzAccount` shows a long list of tenants/subscriptions to choose from, set
+   `$env:ADO_ENTRA_TENANT_ID` to your organization's Microsoft Entra tenant ID beforehand (see
+   [Authentication](#authentication)).
+8. Check your network connectivity to Azure DevOps
+9. Set `$DebugPreference = "Continue"` (already in scripts) to see detailed debug output
 
 ## Notes
 
 - The scripts have debug output enabled by default. To disable, set `$DebugPreference = "SilentlyContinue"` in the scripts.
 - Results are output to the console. To save to a file, use PowerShell redirection: `./scriptName.ps1 > results.txt`
+- With debug output enabled, `Invoke-RestMethod`'s request tracing prints the full `Authorization` header
+  (your PAT's Basic auth value, or your OAuth Bearer token) to the console. Avoid sharing that console output
+  or redirected log files with anyone else, and prefer `$DebugPreference = "SilentlyContinue"` when redirecting
+  output to a file you intend to share.
