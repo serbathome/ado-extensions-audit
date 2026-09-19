@@ -65,6 +65,11 @@ Notes and requirements for OAuth mode:
 
 - Your Azure DevOps organization must be connected to (backed by) a Microsoft Entra ID tenant. Organizations
   that are only backed by Microsoft accounts (MSA) cannot use this mode — use a PAT instead.
+- **The token is automatically requested for the correct tenant.** The scripts discover the Microsoft Entra
+  tenant that backs your organization (from its `X-VSS-ResourceTenant`) and request the access token for that
+  specific tenant. This matters because Azure DevOps rejects a token minted for any other tenant (treating the
+  request as anonymous and redirecting to sign-in) — which is easy to hit if your account can access multiple
+  tenants and `Connect-AzAccount` last selected a subscription in a different one.
 - The acquired token reflects your own Azure DevOps permissions (same access as when signing in through the
   browser); there is no separate scope-consent step like with PATs.
 - Tokens are short-lived (about one hour). `Az.Accounts` caches your sign-in (`Connect-AzAccount`), so
@@ -75,9 +80,10 @@ Notes and requirements for OAuth mode:
   which avoids the interactive prompt entirely.
 - If your account has access to many Microsoft Entra tenants (e.g. as a guest in several organizations),
   `Connect-AzAccount` may show a long "select a tenant and subscription" list and print warnings for
-  unrelated tenants — this is normal and harmless (we only need one token, not a subscription), but you can
-  skip it by setting `$env:ADO_ENTRA_TENANT_ID` to your Azure DevOps organization's Microsoft Entra tenant ID
-  (found under your organization's **Organization settings > Microsoft Entra ID** page) before running a script.
+  unrelated tenants — this is normal and harmless (we only need one token, not a subscription). Automatic
+  tenant discovery usually handles this for you; to override it (or if discovery can't determine the tenant),
+  set `$env:ADO_ENTRA_TENANT_ID` to your organization's Microsoft Entra tenant ID (found under your
+  organization's **Organization settings > Microsoft Entra ID** page) before running a script.
 
 ## Scripts Overview
 
@@ -179,8 +185,13 @@ If you encounter errors:
 7. In OAuth mode, if `Connect-AzAccount` shows a long list of tenants/subscriptions to choose from, set
    `$env:ADO_ENTRA_TENANT_ID` to your organization's Microsoft Entra tenant ID beforehand (see
    [Authentication](#authentication)).
-8. Check your network connectivity to Azure DevOps
-9. Set `$DebugPreference = "Continue"` (already in scripts) to see detailed debug output
+8. In OAuth mode, if the response is an HTML sign-in page or the audit reports no data even though you're
+   signed in (the API treated the request as anonymous), the access token was likely issued for the wrong
+   Microsoft Entra tenant. The scripts auto-discover and request the organization's tenant, but if discovery
+   is blocked (e.g. by a network proxy) set `$env:ADO_ENTRA_TENANT_ID` to your organization's tenant ID to
+   force it.
+9. Check your network connectivity to Azure DevOps
+10. Set `$DebugPreference = "Continue"` (already in scripts) to see detailed debug output
 
 ## Notes
 

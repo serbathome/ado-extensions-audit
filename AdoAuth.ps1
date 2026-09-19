@@ -46,6 +46,48 @@ function Resolve-AdoOrganizationName {
     return $trimmed
 }
 
+function Get-AdoResourceTenantId {
+    <#
+    .SYNOPSIS
+    Discovers the Microsoft Entra tenant ID that backs an Azure DevOps organization.
+
+    .DESCRIPTION
+    Azure DevOps returns the organization's backing tenant in the 'X-VSS-ResourceTenant' response
+    header. We deliberately send 'X-TFS-FedAuthRedirect: Suppress' so an unauthenticated request
+    returns a 401 with that header instead of an HTML sign-in redirect. Returns $null if the tenant
+    can't be determined or the organization is backed by a personal Microsoft account (all-zero GUID).
+    #>
+    param (
+        [Parameter(Mandatory = $true)]
+        [string]$Organization
+    )
+
+    $uri = "https://dev.azure.com/$Organization/_apis/connectionData"
+    $reqHeaders = @{ "X-TFS-FedAuthRedirect" = "Suppress"; "Accept" = "application/json" }
+    $tenant = $null
+    try {
+        $iwrParams = @{ Uri = $uri; Headers = $reqHeaders; MaximumRedirection = 0; ErrorAction = "Stop" }
+        if ($PSVersionTable.PSVersion.Major -ge 6) { $iwrParams["SkipHttpErrorCheck"] = $true }
+        $resp = Invoke-WebRequest @iwrParams
+        $tenant = $resp.Headers["X-VSS-ResourceTenant"]
+    }
+    catch {
+        # Windows PowerShell 5.1 throws on a 401; read the header off the thrown response instead.
+        if ($_.Exception.Response) {
+            $tenant = $_.Exception.Response.Headers["X-VSS-ResourceTenant"]
+        }
+        else {
+            Write-Debug "Unable to discover the organization's Entra tenant: $($_.Exception.Message)"
+        }
+    }
+
+    if ($tenant) { $tenant = ($tenant -join "").Trim() }
+    if ($tenant -and $tenant -ne "00000000-0000-0000-0000-000000000000") {
+        return $tenant
+    }
+    return $null
+}
+
 function Get-AdoAuthHeader {
     <#
     .SYNOPSIS
@@ -57,12 +99,13 @@ function Get-AdoAuthHeader {
     depending on $env:ADO_AUTH_MODE ("PAT", the default, or "OAuth").
     #>
     param (
-        [string]$AuthMode = $(if ($env:ADO_AUTH_MODE) { $env:ADO_AUTH_MODE } else { "PAT" })
+        [string]$AuthMode = $(if ($env:ADO_AUTH_MODE) { $env:ADO_AUTH_MODE } else { "PAT" }),
+        [string]$Organization = $env:ADO_ORGANIZATION
     )
 
     switch ($AuthMode.ToUpperInvariant()) {
         "OAUTH" {
-            return @{ Authorization = "Bearer $(Get-AdoEntraAccessToken)" }
+            return @{ Authorization = "Bearer $(Get-AdoEntraAccessToken -Organization $Organization)" }
         }
         "PAT" {
             return @{ Authorization = "Basic $(Get-AdoPatBase64)" }
@@ -82,6 +125,10 @@ function Get-AdoPatBase64 {
 }
 
 function Get-AdoEntraAccessToken {
+    param (
+        [string]$Organization = $env:ADO_ORGANIZATION
+    )
+
     # Only import Az.Accounts if no version of it is already loaded in this session. Explicitly
     # (re-)importing a different version than one already loaded can fail with an "assembly already
     # loaded" error, because Az's native assemblies can't be side-loaded side-by-side in one process.
@@ -99,6 +146,17 @@ function Get-AdoEntraAccessToken {
         }
     }
 
+    # Determine the Microsoft Entra tenant that backs the Azure DevOps organization. This matters
+    # because Get-AzAccessToken mints a token for a specific tenant, and Azure DevOps rejects tokens
+    # issued for any tenant other than the one backing the organization (the request is then treated
+    # as anonymous and redirected to sign-in). An explicit $env:ADO_ENTRA_TENANT_ID override wins;
+    # otherwise the tenant is auto-discovered from the organization.
+    $tenantId = $env:ADO_ENTRA_TENANT_ID
+    if ([string]::IsNullOrWhiteSpace($tenantId) -and -not [string]::IsNullOrWhiteSpace($Organization)) {
+        $tenantId = Get-AdoResourceTenantId -Organization (Resolve-AdoOrganizationName $Organization)
+        if ($tenantId) { Write-Debug "Discovered organization Entra tenant: $tenantId" }
+    }
+
     if (-not (Get-AzContext -ErrorAction SilentlyContinue)) {
         Write-Output "Sign in with your Microsoft Entra ID account (a browser window will open)..."
 
@@ -106,19 +164,33 @@ function Get-AdoEntraAccessToken {
         # context, so skip populating a context per subscription (-SkipContextPopulation). If the
         # account has access to many tenants (e.g. as a guest), Connect-AzAccount otherwise prompts
         # with a long "select a tenant and subscription" list and probes every tenant for a token.
-        # Set $env:ADO_ENTRA_TENANT_ID to your Azure DevOps organization's Microsoft Entra tenant ID
-        # (or domain name) to skip straight to that tenant and avoid that prompt entirely.
         $connectParams = @{
             SkipContextPopulation = $true
             ErrorAction           = "Stop"
         }
-        if ($env:ADO_ENTRA_TENANT_ID) {
-            $connectParams["Tenant"] = $env:ADO_ENTRA_TENANT_ID
-        }
+        if ($tenantId) { $connectParams["Tenant"] = $tenantId }
         Connect-AzAccount @connectParams | Out-Null
     }
 
-    $tokenResult = Get-AzAccessToken -ResourceUrl $script:AdoEntraResourceId -ErrorAction Stop
+    # Request the token for the organization's tenant explicitly. Without -TenantId, Get-AzAccessToken
+    # uses whatever tenant the current Az context happens to point at, which is often a different
+    # tenant (e.g. the one owning the last-selected subscription) and yields a token the organization
+    # rejects. If a silent token for that tenant isn't cached yet, reconnect to it and retry.
+    $tokenParams = @{ ResourceUrl = $script:AdoEntraResourceId; ErrorAction = "Stop" }
+    if ($tenantId) { $tokenParams["TenantId"] = $tenantId }
+    try {
+        $tokenResult = Get-AzAccessToken @tokenParams
+    }
+    catch {
+        if ($tenantId) {
+            Write-Output "Signing in to the organization's Microsoft Entra tenant ($tenantId)..."
+            Connect-AzAccount -Tenant $tenantId -SkipContextPopulation -ErrorAction Stop | Out-Null
+            $tokenResult = Get-AzAccessToken @tokenParams
+        }
+        else {
+            throw
+        }
+    }
 
     if ($tokenResult.Token -is [System.Security.SecureString]) {
         $bstr = [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($tokenResult.Token)
