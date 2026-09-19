@@ -191,13 +191,14 @@ If you encounter errors:
    is blocked (e.g. by a network proxy) set `$env:ADO_ENTRA_TENANT_ID` to your organization's tenant ID to
    force it.
 9. Check your network connectivity to Azure DevOps
-10. Set `$DebugPreference = "Continue"` (already in scripts) to see detailed debug output
+10. Set `$env:ADO_DEBUG = "1"` before running a script to see detailed debug output
 
 ## Notes
 
-- The scripts have debug output enabled by default. To disable, set `$DebugPreference = "SilentlyContinue"` in the scripts.
+- Debug output is off by default. To enable it, set `$env:ADO_DEBUG = "1"` before running a script (and
+  `Remove-Item Env:\ADO_DEBUG` or `$env:ADO_DEBUG = $null` to turn it back off).
 - Results are output to the console. To save to a file, use PowerShell redirection: `./scriptName.ps1 > results.txt`
-- With debug output enabled, `Invoke-RestMethod`'s request tracing prints the full `Authorization` header
-  (your PAT's Basic auth value, or your OAuth Bearer token) to the console. Avoid sharing that console output
-  or redirected log files with anyone else, and prefer `$DebugPreference = "SilentlyContinue"` when redirecting
-  output to a file you intend to share.
+- With debug output enabled (`ADO_DEBUG`), `Invoke-RestMethod`'s request tracing prints the full
+  `Authorization` header (your PAT's Basic auth value, or your OAuth Bearer token) to the console. Avoid
+  sharing that console output or redirected log files with anyone else, and keep `ADO_DEBUG` unset when
+  redirecting output to a file you intend to share.

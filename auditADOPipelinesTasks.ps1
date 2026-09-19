@@ -4,7 +4,8 @@ $organization = Resolve-AdoOrganizationName $env:ADO_ORGANIZATION
 # Authenticates with a PAT (ADO_PAT) by default, or with Microsoft Entra ID sign-in
 # when $env:ADO_AUTH_MODE is set to "OAuth". See README.md for details.
 $headers = Get-AdoAuthHeader
-$DebugPreference = "Continue" # set to "SilentlyContinue" to disable debug output
+# Set the ADO_DEBUG environment variable to any non-empty value to enable verbose debug output.
+$DebugPreference = if ($env:ADO_DEBUG) { "Continue" } else { "SilentlyContinue" }
 
 # Function to get the list of projects
 function Get-ADOProjects {

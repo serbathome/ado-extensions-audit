@@ -39,7 +39,8 @@ $organization = Resolve-AdoOrganizationName $env:ADO_ORGANIZATION
 # when $env:ADO_AUTH_MODE is set to "OAuth". See README.md for details.
 $headers = Get-AdoAuthHeader
 $csvPath = "dict.csv"
-$DebugPreference = "Continue" # set to "SilentlyContinue" to disable debug output
+# Set the ADO_DEBUG environment variable to any non-empty value to enable verbose debug output.
+$DebugPreference = if ($env:ADO_DEBUG) { "Continue" } else { "SilentlyContinue" }
 
 # Main script execution
 try {
