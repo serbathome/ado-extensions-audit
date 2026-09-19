@@ -1,10 +1,11 @@
 # Constants and configuration
-$organization = $env:ADO_ORGANIZATION
-$pat = $env:ADO_PAT
-$headers = @{
-    Authorization = "Bearer $pat"
-}
-$DebugPreference = "Continue" # set to "SilentlyContinue" to disable debug output
+. "$PSScriptRoot\AdoAuth.ps1"
+$organization = Resolve-AdoOrganizationName $env:ADO_ORGANIZATION
+# Authenticates with a PAT (ADO_PAT) by default, or with Microsoft Entra ID sign-in
+# when $env:ADO_AUTH_MODE is set to "OAuth". See README.md for details.
+$headers = Get-AdoAuthHeader
+# Set the ADO_DEBUG environment variable to any non-empty value to enable verbose debug output.
+$DebugPreference = if ($env:ADO_DEBUG) { "Continue" } else { "SilentlyContinue" }
 
 # Function to get the list of projects
 function Get-ADOProjects {
@@ -78,8 +79,21 @@ try {
             foreach ($pipeline in $pipelines) {
                 Write-Output "  Pipeline: $($pipeline.name), ID: $($pipeline.id)"
                 $pipelineId = $pipeline.id
-                # Get the YAML preview of the pipeline
-                $preview = Get-ADOPipelinePreview -organization $organization -headers $headers -projectName $projectName -pipelineId $pipelineId
+                # Get the YAML preview of the pipeline. Some pipelines can't be previewed (e.g. a
+                # disabled pipeline returns DefinitionDisabledException); handle those per-pipeline so
+                # one failure doesn't abort the whole audit.
+                try {
+                    $preview = Get-ADOPipelinePreview -organization $organization -headers $headers -projectName $projectName -pipelineId $pipelineId
+                }
+                catch {
+                    $reason = $_.ErrorDetails.Message
+                    if ($reason) {
+                        try { $reason = ($reason | ConvertFrom-Json).message } catch { }
+                    }
+                    if (-not $reason) { $reason = $_.Exception.Message }
+                    Write-Output "    Skipping pipeline (no YAML preview available): $reason"
+                    continue
+                }
                 # Check if the preview is null or empty
                 if ($null -eq $preview -or $preview.finalYaml -eq "") {
                     Write-Output "    No YAML preview available for this pipeline."

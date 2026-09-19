@@ -1,10 +1,11 @@
 # Constants and configuration
-$organization = $env:ADO_ORGANIZATION
-$pat = $env:ADO_PAT
-$headers = @{
-    Authorization = "Bearer $pat"
-}
-$DebugPreference = "Continue" # set to "SilentlyContinue" to disable debug output
+. "$PSScriptRoot\AdoAuth.ps1"
+$organization = Resolve-AdoOrganizationName $env:ADO_ORGANIZATION
+# Authenticates with a PAT (ADO_PAT) by default, or with Microsoft Entra ID sign-in
+# when $env:ADO_AUTH_MODE is set to "OAuth". See README.md for details.
+$headers = Get-AdoAuthHeader
+# Set the ADO_DEBUG environment variable to any non-empty value to enable verbose debug output.
+$DebugPreference = if ($env:ADO_DEBUG) { "Continue" } else { "SilentlyContinue" }
 
 try {
     Write-Output "Starting audit of installed tasks..."
@@ -12,7 +13,7 @@ try {
     Write-Debug "Attempting to connect to: $tasksUrl"
     
     try {
-        $response = Invoke-RestMethod -Uri $tasksUrl -Headers $headers -Method Get -ErrorVariable restError -Verbose        
+        $response = Invoke-RestMethod -Uri $tasksUrl -Headers $headers -Method Get -ErrorVariable restError        
         $response = $response.Replace('""', '"_empty"') | ConvertFrom-Json
 
         foreach ($task in $response.value) {
