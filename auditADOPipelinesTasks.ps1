@@ -79,8 +79,21 @@ try {
             foreach ($pipeline in $pipelines) {
                 Write-Output "  Pipeline: $($pipeline.name), ID: $($pipeline.id)"
                 $pipelineId = $pipeline.id
-                # Get the YAML preview of the pipeline
-                $preview = Get-ADOPipelinePreview -organization $organization -headers $headers -projectName $projectName -pipelineId $pipelineId
+                # Get the YAML preview of the pipeline. Some pipelines can't be previewed (e.g. a
+                # disabled pipeline returns DefinitionDisabledException); handle those per-pipeline so
+                # one failure doesn't abort the whole audit.
+                try {
+                    $preview = Get-ADOPipelinePreview -organization $organization -headers $headers -projectName $projectName -pipelineId $pipelineId
+                }
+                catch {
+                    $reason = $_.ErrorDetails.Message
+                    if ($reason) {
+                        try { $reason = ($reason | ConvertFrom-Json).message } catch { }
+                    }
+                    if (-not $reason) { $reason = $_.Exception.Message }
+                    Write-Output "    Skipping pipeline (no YAML preview available): $reason"
+                    continue
+                }
                 # Check if the preview is null or empty
                 if ($null -eq $preview -or $preview.finalYaml -eq "") {
                     Write-Output "    No YAML preview available for this pipeline."
